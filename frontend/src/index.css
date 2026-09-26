@@ -1,0 +1,64 @@
+body{
+  margin: 0;
+}.progress-circle {
+  width: 100%;
+  height: 12px;
+  background: #e5e7eb;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-circle-fill {
+  height: 100%;
+  background: #22c55e;
+  border-radius: 10px;
+  transition: width 0.5s ease;
+}
+.category {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  margin: 6px 0;
+  background: #f1f5f9;
+}
+
+.category.Study {
+  background: #dbeafe;
+}
+
+.category.Health {
+  background: #dcfce7;
+}
+
+.category.Mindfulness {
+  background: #f3e8ff;
+}
+
+.category.Productivity {
+  background: #fef3c7;
+}
+
+.category.Personal {
+  background: #f1f5f9;
+}
+.search-filter {
+  display: flex;
+  gap: 10px;
+  margin: 15px 0;
+  flex-wrap: wrap;
+}
+
+.search-filter input,
+.search-filter select {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.search-filter input {
+  flex: 1;
+  min-width: 200px;
+}
