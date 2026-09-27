@@ -1,64 +1,50 @@
 import { useState, useEffect } from "react";
 import "./App.css";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-} from "chart.js";
-import { Bar } from "react-chartjs-2";
 
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-  Tooltip,
-  Legend
-);
+import Header from "./components/Header";
+import UserBar from "./components/UserBar";
+import AuthScreen from "./components/AuthScreen";
+import XPLevelCard from "./components/XPLevelCard";
+import DailyProgressCard from "./components/DailyProgressCard";
+import BadgeGallery from "./components/BadgeGallery";
+import AnalyticsSection from "./components/AnalyticsSection";
+import HabitFilters from "./components/HabitFilters";
+import HabitList from "./components/HabitList";
+import HabitForm from "./components/HabitForm";
+import HabitEditModal from "./components/HabitEditModal";
+
+import {
+  authApi,
+  habitsApi,
+  analyticsApi,
+  setUnauthorizedHandler,
+  getToken,
+  setToken,
+  removeToken
+} from "./services/api";
+
+import { getTodayDateString, getLast7Days, formatDateToDayMonth } from "./utils/dateUtils";
+import {
+  calculateLevel,
+  calculateCurrentLevelXP,
+  calculateProgress,
+  getMotivationalMessage,
+  checkSevenDayStreak,
+  getChartOptions
+} from "./utils/habitUtils";
 
 function App() {
-  const [habits, setHabits] = useState(() => {
-    const savedHabits = localStorage.getItem("habits");
+  const [user, setUser] = useState(null);
+  const [isAuthChecking, setIsAuthChecking] = useState(() => Boolean(getToken()));
+  const [habits, setHabits] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
+  const [migrationCandidate, setMigrationCandidate] = useState(null);
+  const [isMigrating, setIsMigrating] = useState(false);
 
-    if (savedHabits) {
-      return JSON.parse(savedHabits);
-    }
-
-    return [
-      {
-        id: 1,
-        name: "Drink Water",
-        icon: "💧",
-        streak: 0,
-        done: false,
-        lastCompleted: "",
-        completionHistory: []
-      },
-      {
-        id: 2,
-        name: "Read 30 Minutes",
-        icon: "📚",
-        streak: 0,
-        done: false,
-        lastCompleted: "",
-        completionHistory: []
-      },
-      {
-        id: 3,
-        name: "Exercise",
-        icon: "🏃",
-        streak: 0,
-        done: false,
-        lastCompleted: "",
-        completionHistory: []
-      }
-    ];
-  });
-
+  // Form & modal states
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("⭐");
@@ -66,475 +52,487 @@ function App() {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("All");
 
-  const [xp, setXp] = useState(() => {
-    const savedXP = localStorage.getItem("xp");
-    return savedXP ? Number(savedXP) : 0;
-  });
+  const [editingHabit, setEditingHabit] = useState(null);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
+  const [processingHabitId, setProcessingHabitId] = useState(null);
 
-  useEffect(() => {
-    localStorage.setItem("habits", JSON.stringify(habits));
-  }, [habits]);
+  // Fetch habits and analytics for current user
+  async function loadUserData() {
+    setIsLoading(true);
+    setApiError("");
+    const today = getTodayDateString();
 
-  useEffect(() => {
-    localStorage.setItem("xp", xp);
-  }, [xp]);
+    try {
+      const [habitsRes, analyticsRes, userRes] = await Promise.all([
+        habitsApi.getAll(today),
+        analyticsApi.getWeekly(today),
+        authApi.getMe()
+      ]);
 
-  function completeHabit(id) {
-    const today = new Date().toISOString().split("T")[0];
-
-    setHabits(
-      habits.map((habit) => {
-        if (habit.id !== id) {
-          return habit;
-        }
-
-        if (habit.lastCompleted === today) {
-          return habit;
-        }
-
-        let newStreak = 1;
-
-        if (habit.lastCompleted) {
-          const lastDate = new Date(habit.lastCompleted);
-          const todayDate = new Date(today);
-
-          const difference =
-            (todayDate - lastDate) /
-            (1000 * 60 * 60 * 24);
-
-          if (difference === 1) {
-            newStreak = habit.streak + 1;
-          }
-        }
-
-        setXp((oldXp) => oldXp + 10);
-
-        return {
-          ...habit,
-          done: true,
-          streak: newStreak,
-          lastCompleted: today,
-          completionHistory: [
-            ...(habit.completionHistory || []),
-            today
-          ]
-        };
-      })
-    );
+      if (habitsRes && habitsRes.habits) {
+        setHabits(habitsRes.habits);
+      }
+      if (analyticsRes) {
+        setAnalytics(analyticsRes);
+      }
+      if (userRes && userRes.user) {
+        setUser(userRes.user);
+      }
+    } catch (err) {
+      setApiError(err.message || "Failed to load habit data from server.");
+    } finally {
+      setIsLoading(false);
+    }
   }
 
-  function resetToday() {
-    setHabits(
-      habits.map((habit) => ({
-        ...habit,
-        done: false
-      }))
-    );
-  }
+  // Check initial authentication on mount
+  useEffect(() => {
+    setUnauthorizedHandler((msg) => {
+      setUser(null);
+      setHabits([]);
+      setAnalytics(null);
+      setApiError(msg || "Your session has expired. Please sign in again.");
+    });
 
-  function addHabit() {
-    if (!name.trim()) {
-      alert("Enter a habit name");
+    const token = getToken();
+    if (!token) {
       return;
     }
 
-    const newHabit = {
-      id: Date.now(),
-      name: name,
-      icon: icon,
-      category: category,
-      streak: 0,
-      done: false,
-      lastCompleted: "",
-      completionHistory: []
-    };
+    let isMounted = true;
 
-    setHabits([...habits, newHabit]);
-    setName("");
-    setIcon("⭐");
-    setCategory("Personal");
-    setShowForm(false);
-  }
-  function editHabit(id) {
-  const habit = habits.find((habit) => habit.id === id);
+    async function verifyAndLoad() {
+      try {
+        const today = getTodayDateString();
+        const [userRes, habitsRes, analyticsRes] = await Promise.all([
+          authApi.getMe(),
+          habitsApi.getAll(today),
+          analyticsApi.getWeekly(today)
+        ]);
 
-  if (!habit) {
-    return;
-  }
+        if (isMounted && userRes && userRes.user) {
+          setUser(userRes.user);
+          if (habitsRes && habitsRes.habits) setHabits(habitsRes.habits);
+          if (analyticsRes) setAnalytics(analyticsRes);
 
-  const newName = prompt(
-    "Enter the new habit name:",
-    habit.name
-  );
-
-  if (!newName || !newName.trim()) {
-    return;
-  }
-
-  setHabits(
-    habits.map((habit) =>
-      habit.id === id
-        ? {
-            ...habit,
-            name: newName.trim()
+          // Check if anonymous localStorage habits exist
+          const savedHabits = localStorage.getItem("habits");
+          if (savedHabits) {
+            try {
+              const parsed = JSON.parse(savedHabits);
+              if (Array.isArray(parsed) && parsed.length > 0) {
+                setMigrationCandidate(parsed);
+              }
+            } catch {
+              // ignore
+            }
           }
-        : habit
-    )
-  );
-}
-  function deleteHabit(id) {
-    setHabits(
-      habits.filter((habit) => habit.id !== id)
+        } else {
+          removeToken();
+        }
+      } catch {
+        removeToken();
+      } finally {
+        if (isMounted) {
+          setIsAuthChecking(false);
+        }
+      }
+    }
+
+    verifyAndLoad();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Re-sync habits daily status on focus/visibility change
+  useEffect(() => {
+    if (!user) return;
+
+    function handleVisibilityOrFocus() {
+      const today = getTodayDateString();
+      habitsApi
+        .getAll(today)
+        .then((res) => {
+          if (res && res.habits) {
+            setHabits(res.habits);
+          }
+        })
+        .catch(() => {});
+    }
+
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+    };
+  }, [user]);
+
+  async function handleAuthSuccess(authenticatedUser, token) {
+    setToken(token);
+    setUser(authenticatedUser);
+    setApiError("");
+    setSuccessMessage(`Welcome, ${authenticatedUser.name}!`);
+    setTimeout(() => setSuccessMessage(""), 4000);
+
+    // Check if anonymous localStorage habits exist
+    const savedHabits = localStorage.getItem("habits");
+    if (savedHabits) {
+      try {
+        const parsed = JSON.parse(savedHabits);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMigrationCandidate(parsed);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const today = getTodayDateString();
+    try {
+      const [habitsRes, analyticsRes] = await Promise.all([
+        habitsApi.getAll(today),
+        analyticsApi.getWeekly(today)
+      ]);
+      if (habitsRes && habitsRes.habits) setHabits(habitsRes.habits);
+      if (analyticsRes) setAnalytics(analyticsRes);
+    } catch (err) {
+      setApiError(err.message || "Failed to load habits.");
+    }
+  }
+
+  function handleLogout() {
+    removeToken();
+    setUser(null);
+    setHabits([]);
+    setAnalytics(null);
+    setMigrationCandidate(null);
+    setApiError("");
+    setSuccessMessage("");
+  }
+
+  // Safe migration of anonymous localStorage habits to database
+  async function handleMigrateLocalData() {
+    if (!migrationCandidate || migrationCandidate.length === 0) return;
+    setIsMigrating(true);
+    setApiError("");
+
+    try {
+      for (const item of migrationCandidate) {
+        // Create habit
+        const createdRes = await habitsApi.create({
+          name: item.name || "Habit",
+          icon: item.icon || "⭐",
+          category: item.category || "Personal"
+        });
+
+        // If it was completed today, complete it on the server
+        if (item.done && createdRes && createdRes.habit) {
+          await habitsApi.complete(createdRes.habit.id, getTodayDateString());
+        }
+      }
+
+      // Clear anonymous habits after successful migration
+      localStorage.removeItem("habits");
+      localStorage.removeItem("xp");
+      setMigrationCandidate(null);
+      setSuccessMessage("✅ Successfully imported your local habits into your account!");
+      setTimeout(() => setSuccessMessage(""), 5000);
+
+      await loadUserData();
+    } catch (err) {
+      setApiError(`Migration issue: ${err.message || "Could not complete import."}`);
+    } finally {
+      setIsMigrating(false);
+    }
+  }
+
+  function handleDismissMigration() {
+    localStorage.removeItem("habits");
+    localStorage.removeItem("xp");
+    setMigrationCandidate(null);
+  }
+
+  async function completeHabit(id) {
+    setProcessingHabitId(id);
+    setApiError("");
+    const today = getTodayDateString();
+
+    try {
+      const res = await habitsApi.complete(id, today);
+
+      if (res && res.updatedHabit) {
+        setHabits((prevHabits) =>
+          prevHabits.map((h) => (h.id === id ? res.updatedHabit : h))
+        );
+
+        if (res.totalXp !== undefined) {
+          setUser((prev) => (prev ? { ...prev, total_xp: res.totalXp } : prev));
+        }
+
+        // Refresh analytics
+        const analyticsRes = await analyticsApi.getWeekly(today);
+        if (analyticsRes) {
+          setAnalytics(analyticsRes);
+        }
+      }
+    } catch (err) {
+      setApiError(err.message || "Failed to complete habit.");
+    } finally {
+      setProcessingHabitId(null);
+    }
+  }
+
+  async function addHabit() {
+    if (!name.trim()) {
+      setApiError("Please enter a habit name.");
+      return;
+    }
+
+    setIsSubmittingAdd(true);
+    setApiError("");
+
+    try {
+      const res = await habitsApi.create({
+        name: name.trim(),
+        icon,
+        category
+      });
+
+      if (res && res.habit) {
+        setHabits((prev) => [...prev, res.habit]);
+        setName("");
+        setIcon("⭐");
+        setCategory("Personal");
+        setShowForm(false);
+        setSuccessMessage("Habit added successfully!");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      }
+    } catch (err) {
+      setApiError(err.message || "Failed to create habit.");
+    } finally {
+      setIsSubmittingAdd(false);
+    }
+  }
+
+  function openEditModal(habit) {
+    setEditingHabit(habit);
+    setApiError("");
+  }
+
+  async function handleSaveEdit(updatedData) {
+    setIsSavingEdit(true);
+    setApiError("");
+
+    try {
+      const res = await habitsApi.update(updatedData.id, {
+        name: updatedData.name,
+        icon: updatedData.icon,
+        category: updatedData.category,
+        today: getTodayDateString()
+      });
+
+      if (res && res.habit) {
+        setHabits((prev) =>
+          prev.map((h) => (h.id === updatedData.id ? res.habit : h))
+        );
+        setEditingHabit(null);
+        setSuccessMessage("Habit updated successfully!");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      }
+    } catch (err) {
+      setApiError(err.message || "Failed to update habit.");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
+
+  async function deleteHabit(id) {
+    if (!window.confirm("Are you sure you want to delete this habit?")) {
+      return;
+    }
+
+    setProcessingHabitId(id);
+    setApiError("");
+
+    try {
+      await habitsApi.delete(id);
+      setHabits((prev) => prev.filter((h) => h.id !== id));
+
+      // Refresh weekly analytics
+      const today = getTodayDateString();
+      const analyticsRes = await analyticsApi.getWeekly(today);
+      if (analyticsRes) {
+        setAnalytics(analyticsRes);
+      }
+
+      setSuccessMessage("Habit deleted.");
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (err) {
+      setApiError(err.message || "Failed to delete habit.");
+    } finally {
+      setProcessingHabitId(null);
+    }
+  }
+
+  if (isAuthChecking) {
+    return (
+      <div className="loading-screen">
+        <div className="spinner"></div>
+        <p>Loading HabitForge...</p>
+      </div>
     );
   }
 
-  const level = Math.floor(xp / 100) + 1;
-  const currentLevelXP = xp % 100;
+  if (!user) {
+    return <AuthScreen onAuthSuccess={handleAuthSuccess} />;
+  }
 
-  const completedHabits = habits.filter(
-    (habit) => habit.done
-  ).length;
+  const xp = user.total_xp || 0;
+  const level = calculateLevel(xp);
+  const currentLevelXP = calculateCurrentLevelXP(xp);
 
+  const completedHabits = habits.filter((habit) => habit.done).length;
   const totalHabits = habits.length;
 
-  const progress =
-    totalHabits === 0
-      ? 0
-      : Math.round(
-          (completedHabits / totalHabits) * 100
-        );
-  const motivationalMessages = [
-  "🌱 Small steps every day lead to big changes.",
-  "🔥 Keep going! You're building something great.",
-  "💪 Consistency is your superpower.",
-  "✨ One good habit can change your entire day.",
-  "🚀 You're closer than yesterday. Keep moving!",
-  "🌟 Progress, not perfection.",
-  "🏆 Every completed habit is a win!"
-];
+  const progress = calculateProgress(completedHabits, totalHabits);
+  const message = getMotivationalMessage(completedHabits);
+  const hasSevenDayStreak = checkSevenDayStreak(habits);
 
-const message =
-  motivationalMessages[
-    completedHabits % motivationalMessages.length
-  ];
-
-  const hasSevenDayStreak = habits.some(
-    (habit) => habit.streak >= 7
+  const last7Days = getLast7Days();
+  const chartLabels = (analytics && analytics.dates ? analytics.dates : last7Days).map(
+    formatDateToDayMonth
   );
-
-  const today = new Date();
-  const last7Days = [];
-
-  for (let i = 6; i >= 0; i--) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - i);
-
-    last7Days.push(
-      date.toISOString().split("T")[0]
-    );
-  }
-
-  const chartLabels = last7Days.map((date) => {
-    const parts = date.split("-");
-    return `${parts[2]}/${parts[1]}`;
-  });
-
-  const chartValues = last7Days.map((date) => {
-    let count = 0;
-
-    habits.forEach((habit) => {
-      if (
-        habit.completionHistory &&
-        habit.completionHistory.includes(date)
-      ) {
-        count++;
-      }
-    });
-
-    return count;
-  });
+  const chartValues =
+    analytics && analytics.counts
+      ? analytics.counts
+      : last7Days.map((date) =>
+          habits.filter((h) => h.completionHistory && h.completionHistory.includes(date)).length
+        );
 
   const chartData = {
     labels: chartLabels,
     datasets: [
       {
         label: "Habits Completed",
-        data: chartValues
+        data: chartValues,
+        backgroundColor: "rgba(99, 102, 241, 0.7)",
+        borderColor: "rgba(99, 102, 241, 1)",
+        borderWidth: 1.5,
+        borderRadius: 6
       }
     ]
   };
-
-  const chartOptions = {
-    responsive: true,
-    plugins: {
-      legend: {
-        display: true
-      },
-      title: {
-        display: true,
-        text: "Last 7 Days"
-      }
-    },
-    scales: {
-      y: {
-        beginAtZero: true,
-        ticks: {
-          stepSize: 1
-        }
-      }
-    }
-  };
+  const chartOptions = getChartOptions();
 
   return (
     <div className="app">
-
-      <header>
-        <h1>HabitForge</h1>
-        <p>Build better habits. Every day.</p>
-      </header>
+      <UserBar user={user} onLogout={handleLogout} />
+      <Header />
 
       <main>
+        {successMessage && <div className="success-banner">{successMessage}</div>}
+        {apiError && <div className="error-banner">{apiError}</div>}
 
-        <div className="progress-card">
-          <h2>🏆 Level {level}</h2>
-
-          <p>
-            {currentLevelXP} / 100 XP
-          </p>
-
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{
-                width: currentLevelXP + "%"
-              }}
-            ></div>
-          </div>
-
-          <p>Total XP: {xp}</p>
-        </div>
-
-        <div className="progress-card">
-          <h2>📊 Today's Progress</h2>
-          <p>🎯 Daily Goal: Complete all {totalHabits} habits</p>
-          <p>{message}</p>
-
-          <p>
-            {completedHabits} / {totalHabits} habits completed
-          </p>
-
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{
-                width: progress + "%"
-              }}
-            ></div>
-          </div>
-
-          <p>{progress}% Complete</p>
-          <div className="progress-circle">
-  <div
-    className="progress-circle-fill"
-    style={{
-      width: `${progress}%`
-    }}
-  ></div>
-</div>
-          {progress === 100 && (
-  <p>
-    🎉 Amazing! You completed all your habits today!
-  </p>
-)}
-        </div>
-
-        <div className="progress-card">
-          <h2>🏅 Badges</h2>
-
-          {xp >= 50 && <p>🌟 Rising Star</p>}
-          {xp >= 100 && <p>🏆 XP Master</p>}
-          {xp >= 200 && <p>👑 Habit Champion</p>}
-
-          {hasSevenDayStreak && (
-            <p>
-              🔥 Consistency King — 7 Day Streak
-            </p>
-          )}
-
-          {xp < 50 && !hasSevenDayStreak && (
-            <p>
-              Complete habits to unlock badges!
-            </p>
-          )}
-        </div>
-
-        <div className="progress-card">
-          <h2>📈 Analytics</h2>
-
-          <Bar
-            data={chartData}
-            options={chartOptions}
-          />
-        </div>
-
-        <h2>My Habits</h2>
-        <input
-  type="text"
-  placeholder="🔎 Search habits..."
-  value={search}
-  onChange={(e) => setSearch(e.target.value)}
-/>
-<select
-  value={filterCategory}
-  onChange={(e) => setFilterCategory(e.target.value)}
->
-  <option value="All">All Categories</option>
-  <option value="Personal">🌱 Personal</option>
-  <option value="Study">📚 Study</option>
-  <option value="Health">💪 Health</option>
-  <option value="Mindfulness">🧘 Mindfulness</option>
-  <option value="Productivity">💼 Productivity</option>
-</select>
-
-        <div className="habit-list">
-
-          {habits
-  .filter((habit) =>
-    habit.name.toLowerCase().includes(search.toLowerCase())
-  )
-  .filter((habit) =>
-    filterCategory === "All" ||
-    (habit.category || "Personal") === filterCategory
-  )
-  .map((habit) => (
-            <div
-              className="habit-card"
-              key={habit.id}
-            >
-
-              <div>
-                <h3>
-                  {habit.icon} {habit.name}
-                </h3>
-                <p className={`category ${habit.category || "Personal"}`}>
-  🏷️ {habit.category || "Personal"}
-</p>
-
-                <span>
-                  🔥 {habit.streak} day streak
-                </span>
-              </div>
-
-              <div>
-
-                <button
-                  onClick={() =>
-                    completeHabit(habit.id)
-                  }
-                  disabled={habit.done}
-                >
-                  {habit.done
-                    ? "✓ Completed"
-                    : "✓ Complete"}
-                </button>
-                <button
-  onClick={() =>
-    editHabit(habit.id)
-  }
->
-  ✏️ Edit
-</button>
-
-                <button
-                  onClick={() =>
-                    deleteHabit(habit.id)
-                  }
-                >
-                  🗑 Delete
-                </button>
-
-              </div>
-
+        {migrationCandidate && (
+          <div className="migration-banner">
+            <div className="migration-text">
+              <strong>📦 Local Habits Detected:</strong> We found {migrationCandidate.length} habit(s) stored locally in your browser. Would you like to import them to your account?
             </div>
-          ))}
-
-        </div>
-
-        <button
-          className="add-button"
-          onClick={() =>
-            setShowForm(!showForm)
-          }
-        >
-          + Add Habit
-        </button>
-
-        {showForm && (
-          <div className="habit-form">
-
-            <h2>Add Habit</h2>
-            <div>
-  <p>Choose an icon:</p>
-
-  {["⭐", "💧", "📚", "🏃", "🧘", "🎯", "💪", "🍎"].map(
-    (emoji) => (
-      <button
-        key={emoji}
-        type="button"
-        onClick={() => setIcon(emoji)}
-        style={{
-          fontSize: "24px",
-          margin: "4px",
-          border:
-            icon === emoji
-              ? "2px solid black"
-              : "1px solid #ccc"
-        }}
-      >
-        {emoji}
-      </button>
-    )
-  )}
-  <div>
-  <p>Choose a category:</p>
-
-  <select
-    value={category}
-    onChange={(e) => setCategory(e.target.value)}
-  >
-    <option value="Personal">🌱 Personal</option>
-    <option value="Study">📚 Study</option>
-    <option value="Health">💪 Health</option>
-    <option value="Mindfulness">🧘 Mindfulness</option>
-    <option value="Productivity">💼 Productivity</option>
-  </select>
-</div>
-</div>
-
-            <input
-              type="text"
-              placeholder="Habit name"
-              value={name}
-              onChange={(e) =>
-                setName(e.target.value)
-              }
-            />
-
-            <button onClick={addHabit}>
-              Add Habit
-            </button>
-
+            <div className="migration-buttons">
+              <button
+                className="import-btn"
+                onClick={handleMigrateLocalData}
+                disabled={isMigrating}
+              >
+                {isMigrating ? "Importing..." : "📥 Import Habits"}
+              </button>
+              <button
+                className="dismiss-btn"
+                onClick={handleDismissMigration}
+                disabled={isMigrating}
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 
-        <br />
+        <XPLevelCard
+          level={level}
+          currentLevelXP={currentLevelXP}
+          xp={xp}
+        />
 
-        <button onClick={resetToday}>
-          🔄 Reset Today
-        </button>
+        <DailyProgressCard
+          totalHabits={totalHabits}
+          completedHabits={completedHabits}
+          progress={progress}
+          message={message}
+        />
 
+        <BadgeGallery
+          xp={xp}
+          hasSevenDayStreak={hasSevenDayStreak}
+        />
+
+        <AnalyticsSection
+          chartData={chartData}
+          chartOptions={chartOptions}
+        />
+
+        <h2>My Habits</h2>
+
+        <HabitFilters
+          search={search}
+          onSearchChange={setSearch}
+          filterCategory={filterCategory}
+          onFilterCategoryChange={setFilterCategory}
+        />
+
+        {isLoading ? (
+          <div className="habits-loading">
+            <div className="spinner-small"></div>
+            <p>Syncing habits from server...</p>
+          </div>
+        ) : (
+          <HabitList
+            habits={habits}
+            search={search}
+            filterCategory={filterCategory}
+            onCompleteHabit={completeHabit}
+            onEditHabit={openEditModal}
+            onDeleteHabit={deleteHabit}
+            processingHabitId={processingHabitId}
+          />
+        )}
+
+        <HabitForm
+          showForm={showForm}
+          onToggleForm={() => setShowForm(!showForm)}
+          name={name}
+          onNameChange={setName}
+          icon={icon}
+          onIconChange={setIcon}
+          category={category}
+          onCategoryChange={setCategory}
+          onSubmit={addHabit}
+          isSubmitting={isSubmittingAdd}
+        />
+
+        <HabitEditModal
+          key={editingHabit ? editingHabit.id : "edit-modal"}
+          habit={editingHabit}
+          isOpen={Boolean(editingHabit)}
+          onClose={() => setEditingHabit(null)}
+          onSave={handleSaveEdit}
+          isSaving={isSavingEdit}
+        />
       </main>
-
     </div>
   );
 }

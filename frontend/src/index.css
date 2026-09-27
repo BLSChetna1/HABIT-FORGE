@@ -1,20 +1,7 @@
-body{
+body {
   margin: 0;
-}.progress-circle {
-  width: 100%;
-  height: 12px;
-  background: #e5e7eb;
-  border-radius: 10px;
-  overflow: hidden;
-  margin-top: 10px;
 }
 
-.progress-circle-fill {
-  height: 100%;
-  background: #22c55e;
-  border-radius: 10px;
-  transition: width 0.5s ease;
-}
 .category {
   display: inline-block;
   padding: 4px 10px;
@@ -43,6 +30,7 @@ body{
 .category.Personal {
   background: #f1f5f9;
 }
+
 .search-filter {
   display: flex;
   gap: 10px;

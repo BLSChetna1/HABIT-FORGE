@@ -1,0 +1,35 @@
+{
+  "name": "habitforge-backend",
+  "version": "1.0.0",
+  "description": "Backend REST API for HabitForge application",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "lint": "eslint src"
+  },
+  "keywords": [
+    "habitforge",
+    "habits",
+    "express",
+    "postgresql",
+    "rest-api"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-validator": "^7.2.1",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "eslint": "^9.20.1",
+    "@eslint/js": "^9.20.1",
+    "globals": "^15.14.0"
+  }
+}
